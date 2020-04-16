@@ -71,23 +71,24 @@
         <p class="storybox pt-3">{{mainStory}}</p>
       </v-col>
       <v-col cols="12" md="9">
-        <div flat class="chosencards pa-4 pl-10 pb-8 d-flex flex-row justify-center">
+        <div
+          v-if="getGameStep>2"
+          flat
+          class="chosencards pa-4 pl-10 pb-8 d-flex flex-row justify-center"
+        >
           <v-card
             flat
             hover
-            :disabled="storyCard && chosenCard==card"
+            :disabled="chosenCards.includes(card.toString())==true"
             :class="{chosencard:chosenCard==card}"
             class="mx-1 theircard"
             max-width="80px"
             v-for="(card,index) in closestCards"
             :key="index"
           >
-            <v-img @click="showImage(card)" :src="`http://127.0.0.1:8887/cards/${card}.jpg`"></v-img>
-            <div class="avatar" :class="{active:activePlayer==currentPlayer.id}">
-              <v-img
-                class="avatar-icon"
-                :src="`http://127.0.0.1:8887/avatar/${currentPlayer.color}.png`"
-              ></v-img>
+            <v-img @click="showVote(card)" :src="`http://127.0.0.1:8887/cards/${card}.jpg`"></v-img>
+            <div class="avatar" v-if="getGameStep==4">
+              <v-img class="avatar-icon" :src="`http://127.0.0.1:8887/avatar/${card.color}.png`"></v-img>
             </div>
           </v-card>
         </div>
@@ -99,7 +100,7 @@
           <v-card
             flat
             hover
-            :disabled="storyCard && chosenCard==card"
+            :disabled="(storyCard && chosenCard==card) || (storyCard && chosenCards.includes(card))"
             :class="{chosencard:chosenCard==card}"
             class="mx-1 mycard"
             max-width="95px"
@@ -108,20 +109,17 @@
           >
             <v-img @click="showImage(card)" :src="`http://127.0.0.1:8887/cards/${card}.jpg`">
               <v-btn
-                v-if="chooseTurn"
+                v-if="(getGameStep==1 && role=='storyTeller') || (getGameStep==2 && role=='other' && !storyCard)"
                 x-small
                 class="choose"
                 :class="{green: chosenCard==card || chosenCards.includes(card)}"
                 fab
               >
-                <v-icon
-                  v-if="chosenCard==card || chosenCards.includes(card)"
-                  color="white"
-                  medium
-                >mdi-check</v-icon>
+                <v-icon color="white" medium>mdi-check</v-icon>
               </v-btn>
             </v-img>
           </v-card>
+
           <div class="avatar" :class="{active:activePlayer==currentPlayer.id}">
             <v-badge class="myscorebadge" color="orange" :content="currentPlayer.score.toString()"></v-badge>
             <v-img
@@ -139,9 +137,10 @@
       </v-col>
       <v-col cols="12" md="1"></v-col>
       <v-col cols="12" md="3">
-        <div class="d-flex flex-column story">
+        <div class="d-flex flex-column justify-center story" style="height:100%">
           <v-textarea
-            :disabled="!chosenCard || activePlayer!=getUserId"
+            v-if="role=='storyTeller' && !storyCard"
+            :disabled="storyCard"
             v-model="story"
             outlined
             name="input-7-4"
@@ -152,7 +151,33 @@
             hide-details
             class="mb-3"
           ></v-textarea>
-          <v-btn width="100%" @click="submit" class="storybtn" color="green" large>ارسال</v-btn>
+          <v-btn
+            :disabled="!chosenCard || !story"
+            v-if="role=='storyTeller' && getGameStep==1 && !storyCard"
+            width="100%"
+            @click="submit"
+            class="storybtn"
+            color="green"
+            large
+          >ثبت داستان و کارت</v-btn>
+          <v-btn
+            :disabled="chosenCards==0"
+            v-if="role=='other' && getGameStep==2 && !storyCard"
+            width="100%"
+            @click="submit"
+            class="storybtn"
+            color="green"
+            large
+          >انتخاب کارت مشابه</v-btn>
+          <v-btn
+            :disabled="!vote"
+            v-if="role=='other' && getGameStep==3 && !voteStatus"
+            width="100%"
+            @click="sendVote"
+            class="storybtn"
+            color="green"
+            large
+          >انتخاب کارت قصه گو</v-btn>
         </div>
       </v-col>
     </v-row>
@@ -179,6 +204,20 @@
         </v-btn>
       </v-img>
     </v-dialog>
+    <v-dialog v-model="fullVote" width="370" class="fullimage">
+      <v-img
+        class="fullimg"
+        @click="chooseVote(voteImg)"
+        contain
+        max-height="90vh"
+        :src="`http://127.0.0.1:8887/cards/${voteImg}.jpg`"
+      >
+        <v-icon @click="fullImage=false" class="closebtn" color="white">mdi-close</v-icon>
+        <v-btn v-if="role!='storyTeller' && !voteStatus" class="choose" :class="{green: vote==voteImg}" fab>
+          <v-icon color="white" x-large>mdi-check</v-icon>
+        </v-btn>
+      </v-img>
+    </v-dialog>
   </v-container>
 </template>
 
@@ -193,6 +232,7 @@ export default {
       currentPlayer: null,
       currentCards: [],
       fullImage: false,
+      fullVote: false,
       fullCard: null,
       chosenCard: null,
       chosenCards: [],
@@ -203,7 +243,11 @@ export default {
       mainStory: "",
       storyCard: false,
       numberOfPlayers: null,
-      closestCards: null
+      closestCards: null,
+      vote: null,
+      voteImg: null,
+      role: null,
+      voteStatus: false
     };
   },
   mounted() {
@@ -249,6 +293,9 @@ export default {
         this.players = data.players;
         this.mainStory = data.story;
         this.closestCards = data.closest_cards;
+        if(this.getGameStep==4){
+          this.otherPlayers=[]
+        }
         this.players.forEach((item, index) => {
           if (item.id == this.getUserId) {
             this.currentPlayer = this.players[index];
@@ -260,6 +307,17 @@ export default {
         });
         this.currentCards = this.currentPlayer.in_hand_cards;
         this.activePlayer = data.active_user_id;
+        if (this.activePlayer == this.getUserId) {
+          this.role = "storyTeller";
+        } else {
+          this.role = "other";
+        }
+        if(this.getGameStep==4){
+          this.socket.emit("next_round", {
+          game_code: this.getGameCode
+        });
+        this.newRound()
+        }
         console.log(data);
         this.generateMessage();
       });
@@ -267,6 +325,10 @@ export default {
     showImage(card) {
       this.fullImage = true;
       this.fullCard = card;
+    },
+    showVote(card) {
+      this.fullVote = true;
+      this.voteImg = card;
     },
     chooseCard(card) {
       if (this.numberOfPlayers == 3) {
@@ -320,6 +382,7 @@ export default {
     },
     submit() {
       if (this.getGameStep == 1) {
+        console.log("tellstory");
         this.socket.emit("tell_story", {
           game_code: this.getGameCode,
           user_id: this.getUserId,
@@ -327,6 +390,7 @@ export default {
           story_card: parseInt(this.chosenCard)
         });
       } else {
+        console.log("closecard");
         this.socket.emit("send_close_card", {
           game_code: this.getGameCode,
           user_id: this.getUserId,
@@ -334,6 +398,38 @@ export default {
         });
       }
       this.storyCard = true;
+    },
+    chooseVote(vote) {
+      this.vote = vote;
+    },
+    sendVote() {
+      this.socket.emit("send_vote", {
+        game_code: this.getGameCode,
+        user_id: this.getUserId,
+        vote_card: this.vote
+      });
+      this.voteStatus = true;
+    },
+    newRound(){
+      this.currentPlayer= null,
+      this.currentCards= [],
+      this.fullImage= false,
+      this.fullVote= false,
+      this.fullCard= null,
+      this.chosenCard= null,
+      this.chosenCards= [],
+      this.activePlayer= null,
+      this.otherPlayers= [],
+      this.message= "",
+      this.story= "",
+      this.mainStory= "",
+      this.storyCard= false,
+      this.numberOfPlayers= null,
+      this.closestCards= null,
+      this.vote= null,
+      this.voteImg= null,
+      this.role= null,
+      this.voteStatus= false
     }
   }
 };

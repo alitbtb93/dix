@@ -46,6 +46,7 @@ export default {
     }
     this.socket = io("213.233.180.121:8080");
     if (this.getCreateGame) {
+      console.log('create game')
       this.socket.emit("create_game", {
         game_code: this.getGameCode,
         number_of_players: this.getPlayersNumber,
@@ -53,6 +54,7 @@ export default {
         username: this.getUserName
       });
     }else{
+      console.log('join game')
       this.socket.emit("join_game", {
       game_code: this.getGameCode,
       user_id: this.getUserId,
