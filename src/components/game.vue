@@ -2,6 +2,11 @@
   <v-container>
     <div class="fix-bar px-5 py-3 d-flex flex-column">
       <div class="d-flex justify-center my-1">
+       
+            <v-icon class="leftsideicons">mdi-clock-outline</v-icon>
+            <span>زمان: {{minutes}}:{{seconds}}</span>
+      </div>
+      <div class="d-flex justify-center my-1">
         <v-tooltip right>
           <template v-slot:activator="{ on }">
             <v-icon class="leftsideicons" v-on="on">mdi-poll</v-icon>
@@ -25,14 +30,6 @@
           <span>راهنما</span>
         </v-tooltip>
       </div>
-      <div class="d-flex justify-center my-1">
-        <v-tooltip right>
-          <template v-slot:activator="{ on }">
-            <v-icon class="leftsideicons" v-on="on">mdi-clock-outline</v-icon>
-          </template>
-          <span>زمان</span>
-        </v-tooltip>
-      </div>
     </div>
     <div class="d-flex justify-center">
       <div
@@ -53,7 +50,7 @@
         </v-card>
 
         <div class="otheravatar" :class="{active:activePlayer==player.id}">
-          <v-badge class="scorebadge" color="orange" :content="player.score.toString()"></v-badge>
+          <v-badge class="scorebadge" color="orange" :content="getScore(player)"></v-badge>
           <v-img class="avatar-icon" :src="`http://127.0.0.1:8887/avatar/${player.color}.png`"></v-img>
         </div>
         <div flat class="othernamechip namechip ma-2" :class="{active:activePlayer==player.id}">
@@ -79,14 +76,21 @@
           <v-card
             flat
             hover
-            :disabled="chosenCards.includes(card.toString())==true"
+            :disabled="getGameStep>2 && chosenCards.includes(card.card.toString())==true"
             :class="{chosencard:chosenCard==card}"
             class="mx-1 theircard"
             max-width="80px"
             v-for="(card,index) in closestCards"
             :key="index"
           >
-            <v-img @click="showVote(card)" :src="`http://127.0.0.1:8887/cards/${card}.jpg`"></v-img>
+            <v-img
+              @click="showVote(card.card)"
+              :src="`http://127.0.0.1:8887/cards/${card.card}.jpg`"
+            >
+              <v-btn v-if="role=='other' && vote==card.card" x-small class="choose green" fab>
+                <v-icon color="white" medium>mdi-check</v-icon>
+              </v-btn>
+            </v-img>
             <div class="avatar" v-if="getGameStep==4">
               <v-img class="avatar-icon" :src="`http://127.0.0.1:8887/avatar/${card.color}.png`"></v-img>
             </div>
@@ -95,8 +99,9 @@
       </v-col>
     </v-row>
     <v-row>
-      <v-col cols="12" md="8">
-        <v-card flat class="mycards pa-4 pl-10 pb-8 d-flex flex-row justify-space-between">
+      <v-col v-show="currentCards" cols="12" md="8">
+        <v-card v-show="currentCards" flat class="mycards pa-4 pl-10 pb-8 d-flex flex-row justify-space-between">
+          <transition-group appear class="d-flex"  @before-enter="beforeEnter" @enter="enter" :css="false">
           <v-card
             flat
             hover
@@ -119,9 +124,9 @@
               </v-btn>
             </v-img>
           </v-card>
-
-          <div class="avatar" :class="{active:activePlayer==currentPlayer.id}">
-            <v-badge class="myscorebadge" color="orange" :content="currentPlayer.score.toString()"></v-badge>
+          </transition-group>
+          <div v-show="currentCards" class="avatar" :class="{active:activePlayer==currentPlayer.id}">
+            <v-badge class="myscorebadge" color="orange" :content="getScore(currentPlayer)"></v-badge>
             <v-img
               class="avatar-icon"
               :src="`http://127.0.0.1:8887/avatar/${currentPlayer.color}.png`"
@@ -191,7 +196,7 @@
       >
         <v-icon @click="fullImage=false" class="closebtn" color="white">mdi-close</v-icon>
         <v-btn
-          v-if="chooseTurn"
+          v-if="!storyCard"
           class="choose"
           :class="{green: chosenCard==fullCard || chosenCards.includes(fullCard)}"
           fab
@@ -213,8 +218,13 @@
         :src="`http://127.0.0.1:8887/cards/${voteImg}.jpg`"
       >
         <v-icon @click="fullImage=false" class="closebtn" color="white">mdi-close</v-icon>
-        <v-btn v-if="role!='storyTeller' && !voteStatus" class="choose" :class="{green: vote==voteImg}" fab>
-          <v-icon color="white" x-large>mdi-check</v-icon>
+        <v-btn
+          v-if="role!='storyTeller' && !voteStatus"
+          class="choose"
+          :class="{green: vote==voteImg}"
+          fab
+        >
+          <v-icon v-if="vote==voteImg" color="white" x-large>mdi-check</v-icon>
         </v-btn>
       </v-img>
     </v-dialog>
@@ -225,11 +235,14 @@
 <script>
 import io from "socket.io-client";
 import { mapGetters } from "vuex";
+import gsap from 'gsap'
 export default {
   data() {
     return {
       socket: null,
-      currentPlayer: null,
+      currentPlayer: {
+        id: null
+      },
       currentCards: [],
       fullImage: false,
       fullVote: false,
@@ -247,13 +260,16 @@ export default {
       vote: null,
       voteImg: null,
       role: null,
-      voteStatus: false
+      voteStatus: false,
+      minutes: "00",
+      seconds: "00"
     };
   },
-  mounted() {
-    this.sokcetInit();
+   mounted() {
+    
+     this.sokcetInit();
+    
   },
-  watch: {},
   computed: {
     ...mapGetters([
       "getUserId",
@@ -262,21 +278,10 @@ export default {
       "getUserName",
       "getCreateGame",
       "getGameStep"
-    ]),
-    chooseTurn() {
-      if (this.getGameStep == 1 && this.activePlayer == this.getUserId) {
-        console.log("case 1");
-        return true;
-      } else if (this.getGameStep == 2 && this.activePlayer != this.getUserId) {
-        console.log("case 2");
-        return true;
-      }
-      console.log("case 3");
-      return false;
-    }
+    ])
   },
   methods: {
-    sokcetInit() {
+     sokcetInit() {
       let localGameCode = localStorage.getItem("gameCode");
       if (!this.getGameCode && localGameCode) {
         this.$store.commit("setGameCode", localGameCode);
@@ -287,14 +292,16 @@ export default {
         user_id: this.getUserId,
         username: this.getUserName
       });
-      this.socket.on("get_state", data => {
+       this.socket.on("get_state", data => {
         this.$store.commit("setGameStep", data.step);
         this.numberOfPlayers = data.number_of_players;
         this.players = data.players;
         this.mainStory = data.story;
         this.closestCards = data.closest_cards;
-        if(this.getGameStep==4){
-          this.otherPlayers=[]
+        var now=new Date().getTime()
+        this.timer(now,20)
+        if (this.getGameStep == 4) {
+          this.otherPlayers = [];
         }
         this.players.forEach((item, index) => {
           if (item.id == this.getUserId) {
@@ -312,15 +319,17 @@ export default {
         } else {
           this.role = "other";
         }
-        if(this.getGameStep==4){
+        if (this.getGameStep == 4) {
           this.socket.emit("next_round", {
-          game_code: this.getGameCode
-        });
-        this.newRound()
+            game_code: this.getGameCode
+          });
+          this.newRound();
         }
         console.log(data);
         this.generateMessage();
-      });
+      }
+      );
+     
     },
     showImage(card) {
       this.fullImage = true;
@@ -333,12 +342,18 @@ export default {
     chooseCard(card) {
       if (this.numberOfPlayers == 3) {
         if (this.getGameStep == 2) {
-          if (this.currentCards.includes(card)) {
-            let pastCard = this.currentCards.indexOf(card);
-            this.currentCards.splice(pastCard, 1);
-          } else {
+          if (!this.chosenCards.includes(card) && this.chosenCards.length < 2) {
+            console.log("push");
             this.chosenCards.push(card);
+            return;
           }
+          if (this.chosenCards.includes(card)) {
+            console.log("pull");
+            let past = this.chosenCards.indexOf(card);
+            this.chosenCards.splice(past, 1);
+            return;
+          }
+          console.log("none");
         }
       } else {
         if (this.getGameStep == 2) {
@@ -350,8 +365,6 @@ export default {
       }
     },
     generateMessage() {
-      console.log(this.getUserId);
-      console.log(this.activePlayer);
       if (this.getUserId == this.activePlayer) {
         switch (this.getGameStep) {
           case 1:
@@ -387,7 +400,7 @@ export default {
           game_code: this.getGameCode,
           user_id: this.getUserId,
           story: this.story,
-          story_card: parseInt(this.chosenCard)
+          story_card: this.chosenCard
         });
       } else {
         console.log("closecard");
@@ -410,26 +423,78 @@ export default {
       });
       this.voteStatus = true;
     },
-    newRound(){
-      this.currentPlayer= null,
-      this.currentCards= [],
-      this.fullImage= false,
-      this.fullVote= false,
-      this.fullCard= null,
-      this.chosenCard= null,
-      this.chosenCards= [],
-      this.activePlayer= null,
-      this.otherPlayers= [],
-      this.message= "",
-      this.story= "",
-      this.mainStory= "",
-      this.storyCard= false,
-      this.numberOfPlayers= null,
-      this.closestCards= null,
-      this.vote= null,
-      this.voteImg= null,
-      this.role= null,
-      this.voteStatus= false
+    newRound() {
+      (this.currentPlayer = null),
+        (this.currentCards = []),
+        (this.fullImage = false),
+        (this.fullVote = false),
+        (this.fullCard = null),
+        (this.chosenCard = null),
+        (this.chosenCards = []),
+        (this.activePlayer = null),
+        (this.otherPlayers = []),
+        (this.message = ""),
+        (this.story = ""),
+        (this.mainStory = ""),
+        (this.storyCard = false),
+        (this.numberOfPlayers = null),
+        (this.closestCards = null),
+        (this.vote = null),
+        (this.voteImg = null),
+        (this.role = null),
+        (this.voteStatus = false);
+    },
+    getScore(player) {
+      if (player) {
+        return player.score.toString();
+      }
+    },
+    timer(begin, value) {
+      var beginTime = new Date(begin).getTime();
+      var countDownTo = beginTime + value * 1000;
+      var myTimer = setInterval(() => {
+        var now = new Date().getTime();
+        var distance = countDownTo - now;
+        var minutes = Math.floor((distance % (1000 * 60 * 60)) / (1000 * 60));
+        var seconds = Math.floor((distance % (1000 * 60)) / 1000);
+        if(minutes<10){
+          this.minutes='0'+minutes
+        } else{
+          this.minutes=minutes
+        }
+        if(seconds<10){
+          this.seconds='0'+seconds
+        } else{
+          this.seconds=seconds
+        }
+        if(distance<0){
+          clearInterval(myTimer)
+        }
+      }, 1000);
+    },
+    beforeEnter(el){
+      gsap.from(el,{
+        duration:6,
+        opacity:0,
+        rotateY:0,
+        stagger:1,
+        lazy:true,
+        ease:'elastic',
+        
+      })
+    },
+    enter(el,done){
+      gsap.to(el,{
+        duration:6,
+        opacity:1,
+        scale:1,
+        rotateY:180,
+        stagger:1,
+        lazy:true,
+        ease:'elastic',
+        onComplete:done,
+       
+      })
     }
   }
 };
